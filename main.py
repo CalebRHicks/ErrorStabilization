@@ -200,8 +200,6 @@ def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01
 
     order = H.shape[0]
 
-
-
     np.random.seed(seed)
 
     SN=0
@@ -224,7 +222,10 @@ def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01
         if verbose: print('Tuned Success Rate: ',hSuccessRate,flush=True)
         t2 = time.time()
         if verbose: print('Autotune Time: ',t2-t1)
-    cores = mp.cpu_count()-2
+
+    cores = mp.cpu_count()
+    if cores < 16:
+        cores = cores-2
 
     if verbose: print('running on '+str(cores)+' cores.')
     taskQueue = mp.Queue()
@@ -257,7 +258,7 @@ def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01
     
     for p in processList:
         p.join()
-        p.close()
+      #  p.close()
 
 #    print('------------------------------')
 #    print(SN)
