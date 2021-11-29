@@ -15,7 +15,7 @@ import sys
 from scipy.special import logsumexp
 #Function to return a single n matrix after moving through the chain for a bit
 @jit(nopython=True,nogil=True)
-def sampleN(nStart,N,errsizeN,deltaN,stepN,verbose,autotune):
+def sampleN(nStart,N,errsizeN,deltaN,stepN,verbose):
 
     n = nStart.copy()
     guideN = nGuide(nStart,N,deltaN,errsizeN)
@@ -45,13 +45,13 @@ def sampleN(nStart,N,errsizeN,deltaN,stepN,verbose,autotune):
 #A better solution is to implement smart autotuning so that we can find better h matrices more quickly,
 #but that is messy and hard to implement. I will do so later.
 @jit(nopython=True,nogil=True)
-def sampleH(H,n,hSamples,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,autotune,verbose,applyCutoff,meanConv):
+def sampleH(H,n,hSamples,errsizeH,deltaH,stepH,cutoff,verbose,applyCutoff):
     
     maxChainBase = stepH*1*hSamples
 
     h = H.copy()
     n = n.copy()
-    guideH,convergence = hGuide(h,H,n,deltaH,errsizeH,lowestOrderRatio,convergenceRatio,meanConv)
+    guideH,volRatio,_ = hGuide(h,H,n,deltaH,errsizeH,cutoff)
     order = np.shape(h)[0]
     trials = 0
     nAccepted = 0
@@ -63,7 +63,7 @@ def sampleH(H,n,hSamples,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio
 
     while k < hSamples:
         trials += 1
-        h,guideH,accepted,convergence = hStep(h,H,n,guideH,stepH,deltaH,errsizeH,lowestOrderRatio,convergenceRatio,meanConv)
+        h,guideH,accepted,volRatio = hStep(h,H,n,guideH,stepH,deltaH,errsizeH,cutoff)
         if accepted:
             nStepAccepted +=1
             nAccepted += 1
@@ -71,9 +71,10 @@ def sampleH(H,n,hSamples,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio
             chainLength += max([stepH,maxChainBase/1e5])
            # print('convergence:',convergence)
            # print('length',chainLength,'/',maxChainBase)
+           # print(volRatio)
 
             if applyCutoff==True:
-                if convergence < convergenceRatio:
+                if volRatio < cutoff:
                     hList[k,:,:] = h
                     k += 1
                     printOption=True
@@ -100,8 +101,8 @@ def sampleH(H,n,hSamples,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio
             accRate = nStepAccepted/100
             stepH = stepH * 2**(2*(accRate-0.5))
             nStepAccepted = 0
-        if trials > hSamples*1000:
-            if verbose: print('Not enough H matrices found, abandoning N matrix')
+        if trials > hSamples*10000:
+            if verbose: print('Not enough H matrices found, abandoning N matrix, found ',k)
             return None
     return hList
 
@@ -109,31 +110,30 @@ def sampleH(H,n,hSamples,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio
 def defaultOperator(H,N):
     return np.sort(eigh(H,N,eigvals_only=True))[0]
 
-def calcOnePair(H,nStart,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,lowestOrderRatio,convergenceRatio,hSamples,autotune,verbose,seed,meanConv):
+def calcOnePair(H,nStart,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,cutoff,hSamples,verbose,seed):
     np.random.seed(seed)
     try:
         #Find one n matrix for this pair
         if verbose: print('starting n calculation',flush=True)
-        n = sampleN(nStart,N,errsizeN,deltaN,stepN,verbose,autotune)
-
+        n = sampleN(nStart,N,errsizeN,deltaN,stepN,verbose)
 
         #Now calculate a distribution of H from G1*S1 that does not have the cutoff applied
         if verbose: print('found n. Beginning V calculation',flush=True)
-        hList = sampleH(H,n,hSamples,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,autotune,verbose,False,meanConv)
+        hList = sampleH(H,n,hSamples,errsizeH,deltaH,stepH,cutoff,verbose,False)
 
         if hList is None:
             return 0,0,0,0,n
 
         #Using that list of H matrices, compute the integral for V(N)
         if verbose: print('hlist calculated for V. Beginning integral calculation',flush=True)
-        V = calcWeightInt(np.array(hList),H,n,stepH,deltaH,errsizeH,lowestOrderRatio,convergenceRatio,meanConv)[0]
+        V = calcWeightInt(np.array(hList),H,n,stepH,deltaH,errsizeH,cutoff)[0]
 
         #Now resample H matrices according to G1*S1 but now only take those that meet the cutoff
         if verbose: print('Calculated V. Beginning cutoff hList calculation,log(V)=',V,flush=True)
     #if np.exp(V) == 0.0:
     #    if verbose: print('V=0. Moving on.', flush=True)
     #    return 0,0,0,n
-        hList = sampleH(H,n,hSamples,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,autotune,verbose,True,meanConv)
+        hList = sampleH(H,n,hSamples,errsizeH,deltaH,stepH,cutoff,verbose,True)
         if verbose and hList is not None: print('Completed Cutoff list of H, V=',V,flush=True)
     #hList will be None iff sampleH() gave up on the N matrix, in which case we need to continue trying until we get a better N matrix.
     #The return code for this case is sd=0, but we still return n so that we continue the chain from this point.
@@ -144,13 +144,13 @@ def calcOnePair(H,nStart,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,lowestO
         sd = 0
     #Now compute the inner integral over H for the numerator and denominator
         for h in hList:
-            convergence = hConcavity(h.copy(),n.copy(),lowestOrderRatio,convergenceRatio,meanConv)
-            if convergence < convergenceRatio:
+            volRatio,volFlag = hVolume(h.copy(),n.copy(),cutoff)
+            if volRatio < cutoff and volFlag:
             #print('s1',s1(h,convergence,convergenceRatio,deltaH))
             #print('v',V)
-                sn += 1/s1(h,convergence,convergenceRatio,deltaH)*O(h,n)
-                sno2 += 1/s1(h,convergence,convergenceRatio,deltaH)*(O(h,n))**2
-                sd += 1/s1(h,convergence,convergenceRatio,deltaH)
+                sn += 1/s1(volRatio,cutoff,deltaH)*O(h,n)
+                sno2 += 1/s1(volRatio,cutoff,deltaH)*(O(h,n))**2
+                sd += 1/s1(volRatio,cutoff,deltaH)
                 #print(sd)
         #V = np.exp(V)
         if any(sn==0) or sd==0 or any(sno2==0):
@@ -180,11 +180,11 @@ def calcOnePair(H,nStart,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,lowestO
 def run(taskQueue,retQueue):
     t = taskQueue.get()
     while t is not None:
-        H,n,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,lowestOrderRatio,convergenceRatio,hSamples,autotune,verbose,seed,index,meanConv = t
+        H,n,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,cutoff,hSamples,verbose,seed,index = t
         sd = 0
         trials = 0
         while sd == 0:
-            sn,snSign,sd,sno2,n = calcOnePair(H,n,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,lowestOrderRatio,convergenceRatio,hSamples,autotune,verbose,seed+trials,meanConv)
+            sn,snSign,sd,sno2,n = calcOnePair(H,n,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,cutoff,hSamples,verbose,seed+trials)
             trials = trials+1
         if verbose: print('completed task ',index,flush=True)
         retQueue.put((sn,snSign,sd,sno2))
@@ -193,7 +193,7 @@ def run(taskQueue,retQueue):
 
 
 
-def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01,stepN=0.1,stepH=0.1,deltaN=1e-5,deltaH=1e-5,lowestOrderRatio=2,convergenceRatio=0.8,hSamples=1000,autotune=True,verbose=False,seed=1,meanConv = False):
+def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01,stepN=0.1,stepH=0.1,deltaN=1e-5,deltaH=1e-10,cutoff=-13,hSamples=100,autotune=True,verbose=False,seed=1):
     #Copy input matrices and lose the references for saftey
     N = N.copy()
     H = H.copy()
@@ -219,11 +219,11 @@ def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01
         deltaN,nSuccessRate = tuneN(N,errsizeN,deltaN,stepN)
         if verbose: print('Tuned deltaN value: ',deltaN)
         if verbose: print('Tuned Success Rate: ',nSuccessRate)
-        deltaH,hSuccessRate = tuneH(H,N,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,meanConv)
+        deltaH,hSuccessRate = tuneH(H,N,errsizeH,deltaH,stepH,cutoff)
         if verbose: print('Tuned deltaH value: ',deltaH)
         if verbose: print('Tuned Success Rate: ',hSuccessRate,flush=True)
         t2 = time.time()
-        if verbose: print('Autotune Time: ',t2-t1)
+        if verbose: print('Autotune Time: ',t2-t1,flush=True)
     cores = mp.cpu_count()-2
 
     if verbose: print('running on '+str(cores)+' cores.')
@@ -232,7 +232,7 @@ def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01
 
 
     for i in range(numPairs):
-        taskQueue.put((H,n,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,lowestOrderRatio,convergenceRatio,hSamples,autotune,verbose,seeds[i],i,meanConv))
+        taskQueue.put((H,n,N,O,errsizeN,errsizeH,stepN,stepH,deltaN,deltaH,cutoff,hSamples,verbose,seeds[i],i))
     for i in range(cores):
         taskQueue.put(None)
         
@@ -262,6 +262,9 @@ def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01
 #    print('------------------------------')
 #    print(SN)
 #    print('------------------------------')
+
+
+
     SN,sign = logsumexp(SN,axis=0,b=SNSign,return_sign=True)
 
     SNO2 = logsumexp(SNO2,axis=0)

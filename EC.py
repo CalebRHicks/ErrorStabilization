@@ -15,7 +15,7 @@ def EC(N=100,order=4,seed=1,eN = 0.002,eH = 0.002):
     H0 = (H0+H0.T)/2
     H1 = (H1+H1.T)/2
 
-    np.random.seed(seed)
+#    np.random.seed(seed)
     # Extract ground states for small coupling, put them in matrix vv
     v = np.zeros((N,order))
 

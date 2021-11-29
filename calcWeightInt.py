@@ -4,7 +4,7 @@ from numba import jit
 
 #@jit
 @jit(nopython=True,nogil=True)
-def calcWeightInt(hList,H,n,stepH,deltaH,errsizeH,lowestOrderRatio,convergenceRatio,meanConv):
+def calcWeightInt(hList,H,n,stepH,deltaH,errsizeH,cutoff):
     N = n.copy()
     hAvg = np.sum(hList,0)/len(hList)
     order = hAvg.shape[0]
@@ -20,6 +20,8 @@ def calcWeightInt(hList,H,n,stepH,deltaH,errsizeH,lowestOrderRatio,convergenceRa
     cAvg = np.sum(cList,0)/len(hList)
 
     #print(np.linalg.eigvals(cAvg))
+
+    #Add a tiny bit to help with near singularity
     epsilon = 1e-6
     cAvg = cAvg + np.eye(L)*epsilon
 
@@ -35,7 +37,7 @@ def calcWeightInt(hList,H,n,stepH,deltaH,errsizeH,lowestOrderRatio,convergenceRa
     for i in range(len(hList)):
         h = reshapeMatrix(mu+np.dot(A,np.random.normal(0,1,len(mu))))
 
-        guide,convergence = hGuide(h,H,N,deltaH,errsizeH,lowestOrderRatio,convergenceRatio,meanConv)
+        guide,volRatio,_ = hGuide(h,H,N,deltaH,errsizeH,cutoff)
         #guide = np.exp(guide)
         x = np.array([h[j,k] for j in range(order) for k in range(j,order)])
         g = gaussian(x,mu,cAvg,L)

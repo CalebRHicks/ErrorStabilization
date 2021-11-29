@@ -69,10 +69,10 @@ def tuneN(n,errsizeN,deltaN,stepN):
 #            sOld = sRate
     return 10**dOld,sOld
 @jit(nopython=True)
-def getHAcceptRate(H,N,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,meanConv):
+def getHAcceptRate(H,N,errsizeH,deltaH,stepH,cutoff):
     h = H.copy()
     n = N.copy()
-    guideH,convergence = hGuide(h,H,n,deltaH,errsizeH,lowestOrderRatio,convergenceRatio,meanConv)
+    guideH,volRatio,volFlag = hGuide(h,H,n,deltaH,errsizeH,cutoff)
 
     nTrials = 0
     nAccepted = 0
@@ -84,7 +84,7 @@ def getHAcceptRate(H,N,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,m
 
     for i in range(maxTrials):
         nTrials += 1
-        h,guideH,accepted,convergence = hStep(h,H,n,guideH,stepH,deltaH,errsizeH,lowestOrderRatio,convergenceRatio,meanConv)
+        h,guideH,accepted,volRatio = hStep(h,H,n,guideH,stepH,deltaH,errsizeH,cutoff)
         if accepted:
             nAccepted += 1
             stepAcc += 1
@@ -93,15 +93,15 @@ def getHAcceptRate(H,N,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,m
                 accRate = stepAcc/100
                 stepAcc = 0
                 stepH = stepH*2**(2*(accRate-0.5))
-            if convergence < convergenceRatio:
+            if volRatio < cutoff:
                 nSuccess += 1
     return nSuccess/maxTrials
 @jit(nopython=True)
-def tuneH(H,N,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,meanConv):
+def tuneH(H,N,errsizeH,deltaH,stepH,cutoff):
     h = H.copy()
     n = N.copy()
     
-    sOld = getHAcceptRate(h,n,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,meanConv)
+    sOld = getHAcceptRate(h,n,errsizeH,deltaH,stepH,cutoff)
     numSteps = int(1e3)
 
     stepSize = 0.1
@@ -111,7 +111,7 @@ def tuneH(H,N,errsizeH,deltaH,stepH,lowestOrderRatio,convergenceRatio,meanConv):
     x = np.linspace(dStart-5,dStart+5,numSteps)
     
     for i in x:
-        sRate = getHAcceptRate(h,n,errsizeH,10**i,stepH,lowestOrderRatio,convergenceRatio,meanConv)
+        sRate = getHAcceptRate(h,n,errsizeH,10**i,stepH,cutoff)
         if sRate > sOld:
             sOld = sRate
             dOld = i
