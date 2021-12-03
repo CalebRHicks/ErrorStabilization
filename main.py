@@ -219,9 +219,14 @@ def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01
         deltaN,nSuccessRate = tuneN(N,errsizeN,deltaN,stepN)
         if verbose: print('Tuned deltaN value: ',deltaN)
         if verbose: print('Tuned Success Rate: ',nSuccessRate)
-        deltaH,hSuccessRate = tuneH(H,N,errsizeH,deltaH,stepH,cutoff)
-        if verbose: print('Tuned deltaH value: ',deltaH)
-        if verbose: print('Tuned Success Rate: ',hSuccessRate,flush=True)
+        try:
+            deltaH,hSuccessRate = tuneH(H,N,errsizeH,deltaH,stepH,cutoff)
+
+            if verbose: print('Tuned deltaH value: ',deltaH)
+            if verbose: print('Tuned Success Rate: ',hSuccessRate,flush=True)
+        except:
+            if verbose: print('Error in autotune, reverting to default value,',sys.exc_info())
+            
         t2 = time.time()
         if verbose: print('Autotune Time: ',t2-t1,flush=True)
     cores = mp.cpu_count()-2
@@ -257,7 +262,6 @@ def stabilize(N,H,O=defaultOperator,numPairs=100,errsizeN = 0.01,errsizeH = 0.01
     
     for p in processList:
         p.join()
-        p.close()
 
 #    print('------------------------------')
 #    print(SN)

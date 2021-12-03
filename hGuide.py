@@ -86,6 +86,9 @@ def vol(H,N):
     groundStates = np.zeros((order,order),dtype=np.complex128)
 
     #At first order, the gs is 1
+    
+    if N[0,0] == 0:
+        return 0,9999,False
     groundStates[0,0] = 1/np.sqrt(N[0,0])
     
     for i in range(1,order):
@@ -123,7 +126,8 @@ def getGS(H,N):
     v = vv[:,i]
     
     norm = np.abs(inner(v,N,v))
-
+    if norm == 0:
+        return v, False
     if np.imag(dd[i]) < 1e-9:
         return v/np.sqrt(norm),True
     else:
